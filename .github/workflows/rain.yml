@@ -1,0 +1,48 @@
+name: 朝7時の雨チェック
+
+on:
+  schedule:
+    # GitHub Actions の cron は UTC。22:00 UTC = 翌朝 7:00 JST
+    - cron: "0 22 * * *"
+  workflow_dispatch:
+    inputs:
+      message:
+        description: "手動で送る本文（空なら天気を見て判定）"
+        required: false
+        default: ""
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 失効した購読を subscriptions.json から消して push し直すため
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci || npm install
+
+      - name: 送信
+        env:
+          VAPID_PUBLIC_KEY: ${{ vars.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ vars.VAPID_SUBJECT }}
+          LAT: ${{ vars.LAT }}
+          LON: ${{ vars.LON }}
+          RAIN_THRESHOLD: ${{ vars.RAIN_THRESHOLD }}
+        run: |
+          if [ -n "${{ github.event.inputs.message }}" ]; then
+            node scripts/send.mjs "${{ github.event.inputs.message }}"
+          else
+            node scripts/rain-check.mjs
+          fi
+
+      - name: 失効した購読の削除をコミット
+        run: |
+          if ! git diff --quiet subscriptions.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git commit -m "chore: 失効した購読を削除" subscriptions.json
+            git push
+          fi
