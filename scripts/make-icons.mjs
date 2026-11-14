@@ -26,15 +26,21 @@ function chunk(type, data) {
 
 function png(size) {
   const raw = Buffer.alloc(size * (size * 3 + 1));
-  const cx = size / 2, cy = size * 0.52, r = size * 0.3;
+  const s = (v) => v * size;
+  const cx = s(0.5), domeY = s(0.54), domeW = s(0.34), domeH = s(0.27);
+  const shaftW = s(0.03), hookY = s(0.72), hookR = s(0.09);
   let p = 0;
   for (let y = 0; y < size; y++) {
     raw[p++] = 0; // filter: none
     for (let x = 0; x < size; x++) {
-      const d = Math.hypot(x - cx, y - cy);
-      // 青地に白い雫っぽい丸
-      const inDrop = d < r || (Math.abs(x - cx) < r * (1 - (cy - y) / (r * 1.6)) && y < cy && y > cy - r * 1.9);
-      const [R, G, B] = inDrop ? [255, 255, 255] : [27, 108, 168];
+      const dx = (x - cx) / domeW, dy = (y - domeY) / domeH;
+      // ameyaka マーク: ティール地に白い傘
+      const hd = Math.hypot(x - (cx - hookR), y - hookY);
+      const white =
+        (y <= domeY && dx * dx + dy * dy <= 1) ||                       // 傘のドーム
+        (Math.abs(x - cx) <= shaftW && y >= s(0.21) && y < hookY) ||    // 柄
+        (y >= hookY && hd <= hookR + shaftW && hd >= hookR - shaftW);   // フック
+      const [R, G, B] = white ? [255, 255, 255] : [47, 111, 124];
       raw[p++] = R; raw[p++] = G; raw[p++] = B;
     }
   }

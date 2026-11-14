@@ -1,56 +1,122 @@
-// 今日の降水確率を Open-Meteo で見て、しきい値以上なら push を送る。
-// GitHub Actions から毎朝叩かれる。手元でも `npm run rain` で試せる。
-import { sendToAll } from "./push-core.mjs";
+// 登録された端末ごとに、その人の地域・しきい値・通知タイミングを見て雨なら push を送る。
+//   node scripts/rain-check.mjs             # 出発前（朝）
+//   node scripts/rain-check.mjs --slot=evening --dry-run
+import { send } from "./push-core.mjs";
 import { loadEnv } from "./env.mjs";
 
 loadEnv();
 
-const LAT = process.env.LAT || "35.6895";       // 既定: 東京
-const LON = process.env.LON || "139.6917";
-const TZ = process.env.TZ_NAME || "Asia/Tokyo";
-const THRESHOLD = Number(process.env.RAIN_THRESHOLD || 50); // %
-const DRY_RUN = process.argv.includes("--dry-run");
-
-const url =
-  "https://api.open-meteo.com/v1/forecast" +
-  `?latitude=${LAT}&longitude=${LON}` +
-  "&daily=precipitation_probability_max,precipitation_sum,temperature_2m_max" +
-  `&timezone=${encodeURIComponent(TZ)}&forecast_days=1`;
-
-const res = await fetch(url);
-if (!res.ok) {
-  console.error("Open-Meteo 取得失敗:", res.status, await res.text());
-  process.exit(1);
-}
-const data = await res.json();
-const daily = data.daily || {};
-const prob = daily.precipitation_probability_max?.[0];
-const mm = daily.precipitation_sum?.[0];
-const tmax = daily.temperature_2m_max?.[0];
-const date = daily.time?.[0];
-
-console.log(`${date} 降水確率 ${prob}% / 降水量 ${mm}mm / 最高 ${tmax}℃ (しきい値 ${THRESHOLD}%)`);
-
-if (typeof prob !== "number") {
-  console.error("降水確率が取れませんでした:", JSON.stringify(daily));
-  process.exit(1);
-}
-
-if (prob < THRESHOLD) {
-  console.log("雨は降らなさそうなので通知しません。");
-  process.exit(0);
-}
-
-const payload = {
-  title: "☔ 今日は傘いるよ",
-  body: `降水確率 ${prob}%（予想降水量 ${mm}mm・最高 ${tmax}℃）`,
-  tag: "rain",
-  url: "./",
+const arg = (name, fallback) => {
+  const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
+  return hit ? hit.slice(name.length + 3) : fallback;
 };
 
-if (DRY_RUN) {
-  console.log("dry-run:", payload);
-  process.exit(0);
+const SLOT = arg("slot", process.env.SLOT || "morning"); // morning | evening
+const DRY_RUN = process.argv.includes("--dry-run");
+
+const FALLBACK = {
+  lat: Number(process.env.LAT || 35.6617),
+  lon: Number(process.env.LON || 139.7041),
+  place: process.env.PLACE || "渋谷区",
+  threshold: Number(process.env.RAIN_THRESHOLD || 50),
+};
+
+const cache = new Map();
+
+// Actions の実行環境は一時的に外部接続が詰まることがあるので数回リトライする
+async function fetchJsonWithRetry(url, tries = 3) {
+  let lastError;
+  for (let i = 1; i <= tries; i++) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      if (!res.ok) throw new Error(`Open-Meteo ${res.status}: ${await res.text()}`);
+      return await res.json();
+    } catch (e) {
+      lastError = e;
+      console.warn(`  天気取得に失敗（${i}/${tries}）: ${e.message}`);
+      if (i < tries) await new Promise((r) => setTimeout(r, 2000 * i));
+    }
+  }
+  throw lastError;
 }
 
-await sendToAll(payload);
+async function forecast(lat, lon) {
+  const key = `${lat},${lon}`;
+  if (cache.has(key)) return cache.get(key);
+
+  const url =
+    "https://api.open-meteo.com/v1/forecast" +
+    `?latitude=${lat}&longitude=${lon}` +
+    "&hourly=precipitation_probability" +
+    "&daily=precipitation_probability_max,temperature_2m_max" +
+    "&timezone=Asia%2FTokyo&forecast_days=1";
+  const d = await fetchJsonWithRetry(url);
+
+  const hours = (d.hourly?.time || []).map((t, i) => ({
+    hour: Number(t.slice(11, 13)),
+    prob: d.hourly.precipitation_probability[i] ?? 0,
+  }));
+  const data = {
+    max: d.daily?.precipitation_probability_max?.[0] ?? 0,
+    tmax: d.daily?.temperature_2m_max?.[0] ?? null,
+    date: d.daily?.time?.[0],
+    hours,
+    // 夕方以降（16時〜23時）の最大降水確率
+    evening: hours.filter((h) => h.hour >= 16).reduce((a, h) => Math.max(a, h.prob), 0),
+  };
+  cache.set(key, data);
+  return data;
+}
+
+function compose(slot, w, threshold) {
+  const prob = slot === "evening" ? w.evening : w.max;
+  if (prob < threshold) return null;
+
+  const first = w.hours.find((h) => h.prob >= threshold);
+  if (slot === "evening") {
+    return {
+      kind: "evening",
+      title: "帰宅時間に雨の予報です",
+      body: `降水確率は${prob}%。傘をお忘れなく。`,
+      tag: "ameyaka-evening",
+      url: "./#history",
+    };
+  }
+  return {
+    kind: "morning",
+    title: "今日は傘が必要です",
+    body:
+      `降水確率は${prob}%。` +
+      (first ? `${first.hour}時ごろから降り始める予報です。` : "傘を忘れずにお持ちください。"),
+    tag: "ameyaka-morning",
+    url: "./#history",
+  };
+}
+
+console.log(`slot=${SLOT} dry-run=${DRY_RUN}`);
+
+const result = await send(async (sub) => {
+  const s = sub.settings || {};
+  if (SLOT === "morning" && s.morning === false) return null;
+  if (SLOT === "evening" && s.evening === false) return null;
+
+  const lat = Number(s.lat ?? FALLBACK.lat);
+  const lon = Number(s.lon ?? FALLBACK.lon);
+  const threshold = Number(s.threshold ?? FALLBACK.threshold);
+  const w = await forecast(lat, lon);
+
+  const place = s.place || FALLBACK.place;
+  console.log(
+    `  ${place} (${lat},${lon}) ${w.date} 日中最大 ${w.max}% / 夕方以降 ${w.evening}% / 最高 ${w.tmax}℃ ・しきい値 ${threshold}%`
+  );
+
+  const payload = compose(SLOT, w, threshold);
+  if (DRY_RUN) {
+    console.log("  dry-run →", payload ? payload.title + " / " + payload.body : "送信しない");
+    return null;
+  }
+  return payload;
+});
+
+if (DRY_RUN) console.log("dry-run のため実際には送っていません。");
+else console.log(result);

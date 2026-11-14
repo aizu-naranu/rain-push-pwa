@@ -1,20 +1,47 @@
-# ☔ 傘いるよ通知（GitHub Pages 版）
+# ameyaka — 傘を、忘れない。
 
-朝7時に今日の降水確率をチェックして、雨なら Web Push で通知する PWA。
+雨の日の朝だけ「傘を持って」と知らせる PWA。UI はあめみやさんの Figma 設計に合わせています。
+
+公開URL: <https://aizu-naranu.github.io/rain-push-pwa/>
+
+## 画面
+
+| 画面 | 中身 | 状態 |
+| --- | --- | --- |
+| ホーム | 今日の天気・降水確率・傘の要否・今日の予定・タグ状態 | Open-Meteo から実データ |
+| 設定 | 通知タイミング3種・しきい値・地域・出発/帰宅時刻・購読登録 | localStorage に保存 |
+| 通知履歴 | 受信した push を種別で絞って一覧 | IndexedDB に実データ |
+| 傘の状態 | スマートタグの接続・電池・位置 | **モック**（実機なし） |
 
 ## 構成
 
-GitHub Pages は静的ホスティングなので「サーバーに購読を保存」「朝7時のスケジューラ」は
-置けない。そこを **リポジトリ内の JSON + GitHub Actions の cron** で代用している。
-追加のサーバも有料サービスも不要。
+GitHub Pages は静的ホスティングなので「購読をサーバーに保存」「朝7時のスケジューラ」が置けない。
+そこをリポジトリ内の JSON と GitHub Actions の cron で代用している。追加サーバも有料サービスも不要。
 
 ```
 ブラウザ (GitHub Pages)
-  └ sw.js が push を受けて showNotification
-購読情報 → subscriptions.json（リポジトリにコミット）
-スケジューラ → .github/workflows/rain.yml（毎日 22:00 UTC = 7:00 JST）
+  └ sw.js が push を受けて showNotification + 履歴を IndexedDB に保存
+購読情報 → subscriptions.json（端末ごとの設定つき）
+スケジューラ → .github/workflows/rain.yml
+                22:00 UTC = 7:00 JST  出発前
+                09:00 UTC = 18:00 JST 帰宅前
 天気 → Open-Meteo（APIキー不要・個人利用無料）
 送信 → web-push（VAPID）
+```
+
+### 端末ごとの設定
+
+設定画面で出す購読 JSON には `settings` が入る。`rain-check.mjs` はこれを読んで、
+**端末ごとに地域・しきい値・通知タイミングを変えて判定する**。`settings` が無い購読は
+リポジトリ変数（`LAT` / `LON` / `RAIN_THRESHOLD`）にフォールバックする。
+
+```json
+{
+  "endpoint": "...",
+  "keys": { "p256dh": "...", "auth": "..." },
+  "settings": { "place": "渋谷区", "lat": 35.66, "lon": 139.70,
+                "threshold": 40, "morning": true, "evening": true }
+}
 ```
 
 ## セットアップ
@@ -24,50 +51,41 @@ npm install
 npm run keys          # VAPID 鍵を生成
 ```
 
-1. 出てきた**公開鍵**を `docs/config.js` に貼る
-2. **秘密鍵**を GitHub → Settings → Secrets and variables → Actions
+1. 公開鍵を `docs/config.js` に貼る
+2. Settings → Secrets and variables → Actions
    - Secrets: `VAPID_PRIVATE_KEY`
-   - Variables: `VAPID_PUBLIC_KEY` / `VAPID_SUBJECT`（`mailto:you@example.com`）
-   - 任意の Variables: `LAT` `LON` `RAIN_THRESHOLD`（既定 東京・50%）
-3. Settings → Pages → Source: `main` ブランチの `/docs`
-4. 公開された URL をスマホで開く → 「通知を有効にする」
-5. 画面下の**購読情報 JSON** をコピーして `subscriptions.json` の配列に追記 → commit & push
+   - Variables: `VAPID_PUBLIC_KEY` / `VAPID_SUBJECT` /（任意）`LAT` `LON` `RAIN_THRESHOLD`
+3. Settings → Pages → Source: `main` の `/docs`
+4. 公開 URL をスマホで開く → 設定画面で「通知を有効にする」
+5. 出てきた購読 JSON を `subscriptions.json` の配列に追記 → commit & push
 
-## 手動で通知を飛ばす（デバッグ）
-
-```sh
-# ローカルから
-echo 'VAPID_PUBLIC_KEY=...'  >> .env
-echo 'VAPID_PRIVATE_KEY=...' >> .env
-echo 'VAPID_SUBJECT=mailto:you@example.com' >> .env
-
-npm run push -- "今日は傘いるよ" "☔ テスト"
-npm run rain -- --dry-run    # 天気だけ見て送らない
-```
-
-GitHub の Actions タブ → 「朝7時の雨チェック」→ Run workflow でも手動発火できる
-（`message` を入れるとその本文、空なら天気判定）。
-
-## ローカル確認
+## 手動で通知を飛ばす（デモ・デバッグ）
 
 ```sh
-npm run serve   # http://localhost:8080
+npm run push -- "今日は傘が必要です" "降水確率70%。15時ごろから降り始める予報です。"
+npm run rain -- --dry-run                 # 朝の判定を送らずに確認
+npm run rain -- --slot=evening --dry-run  # 帰宅前の判定
+npm run serve                             # http://localhost:8080
 ```
 
-localhost は secure context 扱いなので Service Worker も通知も動く。
+GitHub の Actions → 「雨チェックと通知」→ Run workflow でも発火できる
+（`message` を入れるとその本文、空なら天気判定。`slot` で朝/夕を選ぶ）。
 
 ## iOS の注意
 
-- iOS 16.4 以降、**ホーム画面に追加した PWA からのみ** Web Push が受け取れる。
+- iOS 16.4 以降、**ホーム画面に追加した PWA からのみ** Web Push を受け取れる。
   Safari のタブで開いただけでは購読できない。
-- `Notification.requestPermission()` は**ユーザー操作の中**で呼ぶ必要がある（実装済み）。
-- デモ当日は**インストール済みの実機**を用意して、通知が届く瞬間だけ見せるのが安全。
+- `Notification.requestPermission()` はユーザー操作の中で呼ぶ必要がある（実装済み）。
+- デモ当日はインストール済みの実機を用意して、通知が届く瞬間だけ見せるのが安全。
 
-## 未確認
+## 検証済み / 未検証
 
-- Open-Meteo は実地確認済み（2026-11-13 東京で降水確率 0% / 最高 19.5℃ を取得）。
-  しきい値の両分岐（送る / 送らない）も dry-run で確認済み。
-- 実機検証済み（2026-11-13 23:39 / iPhone・docomo）。ローカル実行と GitHub Actions 経由の
-  両方から送った通知がロック画面に表示された。「睡眠」集中モード中でも通知センターには入った。
-- GitHub Actions の cron は**混雑時に数分〜数十分遅れる**ことがある（Actions の仕様）。
-  「ぴったり7時」が要るならスケジューラは別途検討。
+**検証済み**
+- iPhone 実機に通知が届くこと（2026-11-13、ローカル直送と Actions 経由の両方）
+- Open-Meteo から実データ取得、しきい値の両分岐
+- Pages ビルドと全アセットの配信、4画面のレイアウト（Chrome 実描画）
+
+**未検証**
+- スマートタグ連携。「傘の状態」画面は**モックデータ**で、画面内にもその旨を明記している
+- 強化通知（傘が玄関にあるときの再通知）は UI のトグルのみ。送信側の実装は未着手
+- GitHub Actions の cron は混雑時に数分〜数十分遅れることがある（Actions の仕様）

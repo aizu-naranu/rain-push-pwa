@@ -12,38 +12,47 @@ export function loadSubscriptions() {
 export function configure() {
   const publicKey = process.env.VAPID_PUBLIC_KEY;
   const privateKey = process.env.VAPID_PRIVATE_KEY;
-  const subject = process.env.VAPID_SUBJECT || "mailto:dev@example.com";
+  const subject = process.env.VAPID_SUBJECT || "https://github.com/aizu-naranu/rain-push-pwa";
   if (!publicKey || !privateKey) {
     throw new Error("VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY が未設定です（.env か GitHub Secrets）");
   }
   webpush.setVapidDetails(subject, publicKey, privateKey);
 }
 
-// 失効した購読（404/410）は subscriptions.json から自動で外す
-export async function sendToAll(payload) {
+const short = (sub) => sub.endpoint.slice(0, 58) + "…";
+
+// payloadFor(sub) が null を返した購読はスキップ。
+// 失効した購読（404/410）は subscriptions.json から自動で外す。
+export async function send(payloadFor) {
   configure();
   const subs = loadSubscriptions();
   if (subs.length === 0) {
     console.log("購読が 0 件です。subscriptions.json に追記してください。");
-    return { sent: 0, removed: 0 };
+    return { sent: 0, skipped: 0, removed: 0 };
   }
 
-  const body = JSON.stringify(payload);
   const alive = [];
-  let sent = 0;
+  let sent = 0, skipped = 0;
 
   for (const sub of subs) {
+    const payload = await payloadFor(sub);
+    if (!payload) {
+      skipped++;
+      alive.push(sub);
+      console.log("skip", short(sub));
+      continue;
+    }
     try {
-      await webpush.sendNotification(sub, body);
+      await webpush.sendNotification(sub, JSON.stringify(payload));
       sent++;
       alive.push(sub);
-      console.log("OK  ", sub.endpoint.slice(0, 60) + "…");
+      console.log("OK  ", short(sub), "-", payload.title);
     } catch (e) {
       const code = e.statusCode;
       if (code === 404 || code === 410) {
-        console.log("期限切れのため削除:", sub.endpoint.slice(0, 60) + "…");
+        console.log("期限切れのため削除:", short(sub));
       } else {
-        console.error(`NG (${code})`, sub.endpoint.slice(0, 60) + "…", e.body || e.message);
+        console.error(`NG (${code})`, short(sub), e.body || e.message);
         alive.push(sub);
       }
     }
@@ -51,6 +60,8 @@ export async function sendToAll(payload) {
 
   const removed = subs.length - alive.length;
   if (removed > 0) writeFileSync(SUBS_PATH, JSON.stringify(alive, null, 2) + "\n");
-  console.log(`送信 ${sent}/${subs.length} 件`);
-  return { sent, removed };
+  console.log(`送信 ${sent} / スキップ ${skipped} / 削除 ${removed}（登録 ${subs.length}）`);
+  return { sent, skipped, removed };
 }
+
+export const sendToAll = (payload) => send(() => payload);
