@@ -1,10 +1,21 @@
 [
   {
-    "endpoint": "https://web.push.apple.com/QBnXzUj7li4M19YjmjcI69EPDRqAsnaFQ5kPwt1NdSiin9Sa3AiJNV0SUuWTmV7E6hh8tV4b7LIfOuZZiCc4U7lfsrgGem4Zusk4QfFB4Ua6fhJGC7dkp5LJezWaD6qaxF1NXQIYRII7X3f1InQkQsVB-PAQWRQ9e_bnR783Lvg",
+    "endpoint": "https://web.push.apple.com/QO57pmXbI45iCsF_t4WpTpfD3z-f6i1bte_MI-A2rebX7GnRTwX17TIbx35oApn49spMb2HzCerbYArWVAKhnrD1TWeWKauz43pVLBr-Gkn6daqV_hYiruK1gcTk5QApjDdnWILIw8bXafuoqytaTUKv-crJi0U7akZXRgt4k18",
     "expirationTime": null,
     "keys": {
-      "p256dh": "BHGvYQ1hJhcBbYbTvaxXAiLAL40WQrFCYO9Z91sBYHh2W3eU9N2ifktVa5OwFozqegJQAoXP2xHQGE1he2CjdWY",
-      "auth": "2atYUa6CE_wFEzsFqHNgzQ"
+      "p256dh": "BP1OOnG3Dp91GK5jD5_NQx9Uom_pS-5LdCo7fy1CxwFe0yp-Ldi97K5yzgZGoQyw1MyF7V_15Iy7JYiN-yHI1WI",
+      "auth": "jR_hQZFSH8HIDrIwg3MJRg"
+    },
+    "settings": {
+      "place": "渋谷区",
+      "lat": 35.6617,
+      "lon": 139.7041,
+      "threshold": 40,
+      "morning": true,
+      "evening": true,
+      "reinforce": true,
+      "departAt": "08:30",
+      "returnAt": "18:30"
     }
   }
 ]
