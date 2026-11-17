@@ -1,5 +1,8 @@
 # ameyaka — 傘を、忘れない。
 
+> **このリポジトリは移行しました。** 開発は共用リポジトリ <https://github.com/yousan/Meeple-and-Koma> に集約しています。
+> ここは新しい公開URLが動くまでの間、デモ用に残しています。
+
 雨の日の朝だけ「傘を持って」と知らせる PWA。UI はあめみやさんの Figma 設計に合わせています。
 
 公開URL: <https://aizu-naranu.github.io/rain-push-pwa/>
