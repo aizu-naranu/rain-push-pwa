@@ -4,6 +4,8 @@
 
 公開URL: <https://aizu-naranu.github.io/rain-push-pwa/>
 
+使用技術・開発体制・既知の弱点は [TECH.md](TECH.md) にまとめてあります。
+
 ## 画面
 
 | 画面 | 中身 | 状態 |
