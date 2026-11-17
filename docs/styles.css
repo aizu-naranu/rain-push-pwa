@@ -226,11 +226,23 @@ textarea {
   }
   .brand .mark { width: 36px; height: 36px; flex-basis: 36px; border-radius: 11px; }
   .brand h1 { font-size: .95rem; }
-  .nav { flex-direction: row; overflow-x: auto; gap: 4px; padding-bottom: 10px; scrollbar-width: none; }
-  .nav::-webkit-scrollbar { display: none; }
-  .nav a { padding: 9px 13px; white-space: nowrap; font-size: .8rem; }
+  /* 仕様書 3. 共通仕様: スマホ幅は画面下のタブバー */
+  .nav {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    flex-direction: row; gap: 0;
+    background: rgba(255, 255, 255, .94);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    border-top: 1px solid var(--line);
+    padding: 7px 4px calc(7px + env(safe-area-inset-bottom));
+  }
+  .nav a {
+    flex: 1; flex-direction: column; gap: 3px; justify-content: center;
+    padding: 6px 2px; border-radius: 12px; font-size: .64rem; white-space: nowrap;
+  }
+  .nav a svg { width: 21px; height: 21px; }
+  .nav a.active { background: transparent; color: var(--teal); }
   .sidebar-foot { display: none; }
-  .main { padding: 20px 16px 48px; }
+  .main { padding: 20px 16px calc(96px + env(safe-area-inset-bottom)); }
   .page-head h2 { font-size: 1.5rem; }
   .hero .glyph { width: 92px; opacity: .8; top: 54px; }
   .hero .temp { font-size: 2.6rem; }

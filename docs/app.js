@@ -477,7 +477,7 @@ function viewTag() {
           <rect x="136" y="60" width="26" height="30" rx="8" fill="${t.present ? "#e08b4a" : "#c3ccce"}"/>
         </svg>
         <div class="last">最後に確認 ${t.present ? "たった今" : "3時間前"}</div>
-        <div class="where">傘は${t.present ? t.spot : "見つかりません"}</div>
+        <div class="where">${t.present ? `傘は${t.spot}にあります` : "傘が見つかりません"}</div>
         ${t.present ? '<div class="ok">✓ 傘立てで検知</div>' : '<div class="mock">持ち出し中、または電波が届いていません</div>'}
       </section>
 

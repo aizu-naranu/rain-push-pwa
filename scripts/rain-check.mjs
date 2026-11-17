@@ -69,26 +69,37 @@ async function forecast(lat, lon) {
   return data;
 }
 
-function compose(slot, w, threshold) {
+// 仕様書 5.1 通知の種類 の文面に合わせる。
+// 帰宅前は A/B の出し分け: 傘の場所が office と判定できるときだけ A。
+function compose(slot, w, threshold, umbrellaLocation) {
   const prob = slot === "evening" ? w.evening : w.max;
   if (prob < threshold) return null;
 
   const first = w.hours.find((h) => h.prob >= threshold);
   if (slot === "evening") {
+    const atOffice = umbrellaLocation === "office";
     return {
       kind: "evening",
       title: "帰宅時間に雨の予報です",
-      body: `降水確率は${prob}%。傘をお忘れなく。`,
+      body: atOffice
+        ? "会社に置いてある傘をお忘れなく。"
+        : `降水確率は${prob}%。傘はお持ちですか？`,
       tag: "ameyaka-evening",
       url: "./#history",
     };
   }
+
+  // 降り始めの時間帯でタイトルを変える（仕様書の例「午後から雨が降る予報です」）
+  const when =
+    first === undefined ? "今日は雨の予報です"
+    : first.hour < 12 ? "午前中に雨が降る予報です"
+    : first.hour < 17 ? "午後から雨が降る予報です"
+    : "夕方から雨が降る予報です";
+
   return {
     kind: "morning",
-    title: "今日は傘が必要です",
-    body:
-      `降水確率は${prob}%。` +
-      (first ? `${first.hour}時ごろから降り始める予報です。` : "傘を忘れずにお持ちください。"),
+    title: when,
+    body: `降水確率は${prob}%。${prob >= 80 ? "折りたたみ傘ではなく長傘がおすすめです。" : "傘を忘れずにお持ちください。"}`,
     tag: "ameyaka-morning",
     url: "./#history",
   };
@@ -111,7 +122,7 @@ const result = await send(async (sub) => {
     `  ${place} (${lat},${lon}) ${w.date} 日中最大 ${w.max}% / 夕方以降 ${w.evening}% / 最高 ${w.tmax}℃ ・しきい値 ${threshold}%`
   );
 
-  const payload = compose(SLOT, w, threshold);
+  const payload = compose(SLOT, w, threshold, s.umbrellaLocation);
   if (DRY_RUN) {
     console.log("  dry-run →", payload ? payload.title + " / " + payload.body : "送信しない");
     return null;
