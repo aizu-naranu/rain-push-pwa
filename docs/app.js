@@ -49,6 +49,7 @@ const PAGES = [
 /* ---------- 状態 ---------- */
 const LS = "ameyaka.settings";
 const LS_TAG = "ameyaka.tagstate";
+const LS_DEMO = "ameyaka.demo";
 
 let settings = { ...DEFAULTS, ...safeParse(localStorage.getItem(LS)) };
 let weather = null;
@@ -60,14 +61,87 @@ function safeParse(s) { try { return JSON.parse(s) || {}; } catch { return {}; }
 function saveSettings() { localStorage.setItem(LS, JSON.stringify(settings)); }
 function place() { return PLACES[settings.place] || PLACES.shibuya; }
 
+// デモ用の天気固定。撮影・発表で当日の天気に左右されないようにする。
+// URL に ?demo=rain / sunny / live を付けても切り替わる。
+const DEMO_PRESETS = {
+  live: null,
+  rain: { label: "雨予報", max: 70, temp: 18.4, firstHour: 15 },
+  heavy: { label: "大雨", max: 90, temp: 14.2, firstHour: 9 },
+  sunny: { label: "晴れ", max: 10, temp: 22.0, firstHour: null },
+};
+
+function demoMode() {
+  const q = new URLSearchParams(location.search).get("demo");
+  if (q && q in DEMO_PRESETS) localStorage.setItem(LS_DEMO, q);
+  const saved = localStorage.getItem(LS_DEMO);
+  return saved && saved in DEMO_PRESETS ? saved : "live";
+}
+
+function setDemoMode(mode) {
+  localStorage.setItem(LS_DEMO, mode);
+}
+
 function tagState() {
   return { present: true, battery: 82, spot: "玄関", ...safeParse(localStorage.getItem(LS_TAG)) };
 }
 function saveTagState(s) { localStorage.setItem(LS_TAG, JSON.stringify(s)); }
 
+/* ---------- 雨の日チェック ----------
+   雨予報の日は、傘のタグにスマホをかざすまでアプリが先に進まない。
+   タグには ?tag=umbrella 付きの URL を書き込んでおき、かざすとその URL が開いて解除される。
+   デモではボタンで代用する（画面に「デモ」と明記）。 */
+const LS_CHECK = "ameyaka.umbrellaCheck";
+
+function todayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+function umbrellaCheck() {
+  const c = safeParse(localStorage.getItem(LS_CHECK));
+  return c.day === todayKey() ? c : null;
+}
+function markUmbrellaChecked(via) {
+  localStorage.setItem(LS_CHECK, JSON.stringify({ day: todayKey(), at: Date.now(), via }));
+}
+function resetUmbrellaCheck() { localStorage.removeItem(LS_CHECK); }
+function gateActive() { return settings.reinforce && needsUmbrella() && !umbrellaCheck(); }
+
+// ?tag=... でチェック済み、?gate=reset でやり直し。処理したらアドレスバーから消す
+function consumeUrlParams() {
+  const q = new URLSearchParams(location.search);
+  let changed = false;
+  if (q.has("tag")) { markUmbrellaChecked("tag"); q.delete("tag"); changed = true; }
+  if (q.get("gate") === "reset") { resetUmbrellaCheck(); q.delete("gate"); changed = true; }
+  if (changed) {
+    const qs = q.toString();
+    history.replaceState(null, "", location.pathname + (qs ? "?" + qs : "") + location.hash);
+  }
+}
+
 /* ---------- 天気 ---------- */
 async function loadWeather() {
   const p = place();
+  const preset = DEMO_PRESETS[demoMode()];
+  if (preset) {
+    const hours = Array.from({ length: 24 }, (_, hour) => ({
+      hour,
+      prob: preset.firstHour === null ? preset.max : hour >= preset.firstHour ? preset.max : Math.max(0, preset.max - 50),
+    }));
+    weather = {
+      temp: preset.temp,
+      max: preset.max,
+      summary:
+        preset.max < settings.threshold ? "一日を通して晴れ"
+        : preset.firstHour !== null && preset.firstHour >= 12 ? "午後から雨"
+        : "午前中から雨",
+      firstHour: preset.max >= settings.threshold ? preset.firstHour : null,
+      hours,
+      updatedAt: new Date(),
+      mocked: true,
+    };
+    return weather;
+  }
+
   const url =
     "https://api.open-meteo.com/v1/forecast" +
     `?latitude=${p.lat}&longitude=${p.lon}` +
@@ -176,6 +250,7 @@ function viewHome() {
     : { l: "置いていこう", t: "今日は傘は不要です", s: "降水確率が" + settings.threshold + "%未満です" };
 
   const tag = tagState();
+  const check = settings.reinforce && needsUmbrella() ? umbrellaCheck() : null;
 
   main.innerHTML =
     head({
@@ -184,6 +259,7 @@ function viewHome() {
       right: '<div class="avatar">A</div>',
     }) +
     `<div class="content">
+      ${w && w.mocked ? `<div class="notice">${SVG.info}<span>天気は<b>デモ値（${DEMO_PRESETS[demoMode()].label}）</b>です。傘の状態はモックです。通知の配信は実装済みです。</span></div>` : ""}
       <section class="hero">
         <div class="place">${SVG.pin}<span>${p.name}</span></div>
         <div class="updated">${w ? hhmm(w.updatedAt) + " 更新" : ""}</div>
@@ -202,6 +278,16 @@ function viewHome() {
           <div class="s">${advice.s}</div>
         </div>
       </section>
+
+      ${check ? `<section class="card advice checked">
+        <div class="icon">${SVG.save}</div>
+        <div class="grow">
+          <div class="l">雨の日チェック</div>
+          <div class="t" style="font-size:.95rem">傘を持ちました</div>
+          <div class="s">${hhmm(new Date(check.at))} に${check.via === "tag" ? "タグで" : "デモで"}確認</div>
+        </div>
+        <button class="btn ghost mini" id="gateReset">やり直す</button>
+      </section>` : ""}
 
       <div class="row-between">
         <div><div class="eyebrow">TODAY</div><div class="section-title">今日の予定</div></div>
@@ -235,6 +321,31 @@ function viewHome() {
     </div>`;
 }
 
+/* ---- 雨の日チェック（傘を持つまで先に進めない） ---- */
+function viewGate() {
+  const w = weather;
+  main.innerHTML =
+    head({
+      eyebrow: "雨の日チェック",
+      title: "傘を持ちましたか？",
+      lead: `今日の降水確率は${w.max}%。傘のタグにスマホをかざすまで、アプリは先に進めません。`,
+    }) +
+    `<div class="content">
+      <section class="gate-stage">
+        <div class="gate-ring"><div class="gate-icon">${SVG.umbrella}</div></div>
+        <div class="gate-title">傘のタグに<br>スマホをかざしてください</div>
+        <div class="gate-sub">${SVG.cloudRain}<span>${w.firstHour !== null ? `${w.firstHour}時ごろから雨の予報です` : "雨の予報です"}</span></div>
+      </section>
+      <button class="btn ghost" id="gateDemo">${SVG.save}<span>タグをかざした（デモ）</span></button>
+      <div class="foot-note">デモではこのボタンがタグの読み取りの代わりです。<br>実機ではタグに書き込んだ URL（末尾 <b>?tag=umbrella</b>）を開くと解除されます。</div>
+    </div>`;
+
+  document.getElementById("gateDemo").addEventListener("click", () => {
+    markUmbrellaChecked("demo");
+    render();
+  });
+}
+
 /* ---- 設定 ---- */
 function viewSettings() {
   const enabled = !!subscription;
@@ -253,7 +364,7 @@ function viewSettings() {
         <div class="timeline" style="margin-top:10px">
           ${toggleRow("morning", "go", "bag", "出発前通知", `${minusMinutes(settings.departAt, settings.leadMinutes)}・出発の${settings.leadMinutes}分前`)}
           ${toggleRow("evening", "home", "house", "帰宅前通知", `${minusMinutes(settings.returnAt, settings.leadMinutes)}・帰宅の${settings.leadMinutes}分前`)}
-          ${toggleRow("reinforce", "bell", "bell", "強化通知", "雨予報で傘が玄関にあるとき")}
+          ${toggleRow("reinforce", "bell", "bell", "強化通知", "雨の日は傘のタグをかざすまで先に進めない")}
         </div>
       </section>
 
@@ -290,6 +401,19 @@ function viewSettings() {
       </section>
 
       <button class="btn" id="save">${SVG.save}<span>この内容で保存</span></button>
+
+      <div class="section-label">DEMO</div>
+      <section class="card">
+        <div class="section-title">デモ用の天気</div>
+        <div class="s" style="font-size:.74rem;color:var(--muted);margin:4px 0 12px">
+          撮影や発表で当日の天気に左右されないための切替。デモ値のときはホームにその旨を表示します。
+        </div>
+        <div class="tabs" id="demoTabs">
+          ${Object.entries(DEMO_PRESETS).map(([k, v]) =>
+            `<button class="tab ${k === demoMode() ? "active" : ""}" data-demo="${k}">${v ? v.label + " " + v.max + "%" : "実天気API"}</button>`
+          ).join("")}
+        </div>
+      </section>
 
       <div class="section-label">PUSH</div>
       <section class="card">
@@ -354,6 +478,14 @@ function bindSettings() {
     refreshSubJson();
     setTimeout(() => { btn.innerHTML = SVG.save + "<span>この内容で保存</span>"; }, 1600);
   });
+
+  main.querySelectorAll("#demoTabs .tab").forEach((t) =>
+    t.addEventListener("click", async () => {
+      setDemoMode(t.dataset.demo);
+      try { await loadWeather(); } catch {}
+      render();
+    })
+  );
 
   document.getElementById("pushBtn").addEventListener("click", togglePush);
   document.getElementById("testBtn").addEventListener("click", testNotification);
@@ -567,13 +699,26 @@ async function testNotification() {
 const views = { home: viewHome, settings: viewSettings, history: viewHistory, tag: viewTag };
 
 function render() {
+  const gated = gateActive();
+  document.body.classList.toggle("gated", gated);
   renderNav();
   renderChip();
-  views[currentPage()]();
+  (gated ? viewGate : views[currentPage()])();
+  document.getElementById("gateReset")?.addEventListener("click", () => {
+    resetUmbrellaCheck();
+    render();
+  });
 }
 
 async function boot() {
+  consumeUrlParams();
   render();
+
+  // 天気の読み込みを Service Worker の準備待ちの後ろにしない（初回表示がその分遅くなるため）
+  const weatherReady = loadWeather().then(
+    () => render(),
+    (e) => console.warn("天気取得失敗", e)
+  );
 
   if ("serviceWorker" in navigator) {
     try {
@@ -588,7 +733,7 @@ async function boot() {
     }
   }
 
-  try { await loadWeather(); } catch (e) { console.warn("天気取得失敗", e); }
+  await weatherReady;
   render();
 }
 
