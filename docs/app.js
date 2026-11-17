@@ -170,9 +170,10 @@ function viewHome() {
       : "まとまった雨の予報はありません"
     : "天気を取得しています…";
 
+  // ラベルと本文が矛盾しないよう、要否で見出しごと切り替える
   const advice = needsUmbrella()
-    ? { t: "今日は傘が必要です", s: w.firstHour !== null && w.firstHour >= 15 ? "帰宅時間に雨が予想されています" : "外出時に雨が予想されています" }
-    : { t: "今日は傘がいりません", s: "降水確率が" + settings.threshold + "%未満です" };
+    ? { l: "持っていこう", t: "今日は傘が必要です", s: w.firstHour !== null && w.firstHour >= 15 ? "帰宅時間に雨が予想されています" : "外出時に雨が予想されています" }
+    : { l: "置いていこう", t: "今日は傘は不要です", s: "降水確率が" + settings.threshold + "%未満です" };
 
   const tag = tagState();
 
@@ -196,11 +197,10 @@ function viewHome() {
       <section class="card advice">
         <div class="icon">${SVG.umbrella}</div>
         <div class="grow">
-          <div class="l">持っていこう</div>
+          <div class="l">${advice.l}</div>
           <div class="t">${advice.t}</div>
           <div class="s">${advice.s}</div>
         </div>
-        <a class="chev" href="#settings">${SVG.chevron}</a>
       </section>
 
       <div class="row-between">
