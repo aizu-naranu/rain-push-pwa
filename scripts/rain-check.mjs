@@ -24,17 +24,18 @@ const FALLBACK = {
 const cache = new Map();
 
 // Actions の実行環境は一時的に外部接続が詰まることがあるので数回リトライする
-async function fetchJsonWithRetry(url, tries = 3) {
+// 実際に 2026-11-14 と 11-16 の cron がこれで落ちているので、回数と待ち時間を多めに取る
+async function fetchJsonWithRetry(url, tries = 5) {
   let lastError;
   for (let i = 1; i <= tries; i++) {
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
       if (!res.ok) throw new Error(`Open-Meteo ${res.status}: ${await res.text()}`);
       return await res.json();
     } catch (e) {
       lastError = e;
       console.warn(`  天気取得に失敗（${i}/${tries}）: ${e.message}`);
-      if (i < tries) await new Promise((r) => setTimeout(r, 2000 * i));
+      if (i < tries) await new Promise((r) => setTimeout(r, 3000 * 2 ** (i - 1)));
     }
   }
   throw lastError;
